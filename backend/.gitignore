@@ -1,0 +1,54 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+.env.*
+
+# Flask
+instance/
+*.sqlite3
+*.db
+
+# Virtual environments
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing and coverage
+.coverage
+.tox/
+.cache/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Mypy
+.mypy_cache/
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# MacOS
+.DS_Store
+
+# Docker
+docker-compose.override.yml
+docker-compose.yml
+
+# Other
+*.swp
+*.swo
+*.bak
+*.orig
