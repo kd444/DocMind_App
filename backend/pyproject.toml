@@ -12,7 +12,7 @@ uvicorn = "^0.32.0"
 python-dotenv = "^1.0.1"
 pdfminer-six = "^20240706"
 langchain = "^0.3.5"
-openai = "^1.53.0"
+openai = "0.28"
 pinecone-client = "^5.0.1"
 
 
