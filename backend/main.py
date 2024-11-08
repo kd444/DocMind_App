@@ -3,99 +3,141 @@ import json
 import shutil
 import fitz  # PyMuPDF
 import openai
+import torch
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
-from pinecone import Pinecone, ServerlessSpec
+from fastapi.middleware.cors import CORSMiddleware
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
-# Load environment variables from .env file
+# Load environment variables and setup directories
 load_dotenv()
-
-# Set your OpenAI API key from environment variable
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-# Get Pinecone API key from environment variable
-pinecone_api_key = os.getenv("PINECONE_API_KEY")
-
-# Hardcoded Pinecone environment
-environment = "us-east-1"  # Replace with your specific environment if different
-
-# Initialize Pinecone
-pc = Pinecone(
-    api_key=pinecone_api_key
-)
-
-# Create or connect to the Pinecone index
-index_name = "document-vectors"
-if index_name not in pc.list_indexes().names():
-    pc.create_index(
-        name=index_name,
-        dimension=1536,
-        metric="cosine",
-        spec=ServerlessSpec(
-            cloud="aws",
-            region=environment
-        )
-    )
-index = pc.Index(index_name)
-
-# Function to generate embeddings using OpenAI's updated Embedding API
-def get_embedding(text, model="text-embedding-ada-002"):
-    response = openai.Embedding.create(
-        model=model,
-        input=[text]  # Ensure the input is a list of strings
-    )
-    return response['data'][0]['embedding']
-
-app = FastAPI()
-
-# Directory to save the uploaded PDFs and extracted text files
 UPLOAD_DIR = "uploaded_files"
 EXTRACTED_TEXT_DIR = "extracted_texts"
-
-# Ensure directories exist
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(EXTRACTED_TEXT_DIR, exist_ok=True)
 
-@app.post("/upload")
+# Initialize FastAPI app
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize summarizer pipeline
+MODEL_NAME = "facebook/bart-large-cnn"
+summarizer = pipeline("summarization", model=MODEL_NAME)
+
+def chunk_text(text, max_chunk_size=1024):
+    """Split text into smaller chunks for processing"""
+    words = text.split()
+    chunks = []
+    current_chunk = []
+    current_size = 0
+
+    for word in words:
+        if current_size + len(word) + 1 > max_chunk_size:
+            chunks.append(' '.join(current_chunk))
+            current_chunk = [word]
+            current_size = len(word)
+        else:
+            current_chunk.append(word)
+            current_size += len(word) + 1
+
+    if current_chunk:
+        chunks.append(' '.join(current_chunk))
+    return chunks
+
+def generate_summary(text):
+    """Generate summary using the summarization pipeline"""
+    # Split text into chunks if it's too long
+    chunks = chunk_text(text)
+    summaries = []
+
+    for chunk in chunks:
+        # Skip empty or very short chunks
+        if len(chunk.split()) < 10:
+            continue
+
+        summary = summarizer(
+            chunk,
+            max_length=150,
+            min_length=30,
+            do_sample=False,
+            num_beams=4,
+            early_stopping=True
+        )
+        summaries.append(summary[0]['summary_text'])
+
+    # Combine summaries if multiple chunks were processed
+    final_summary = " ".join(summaries)
+    return final_summary
+
+@app.get("/analysis")
+def analyze_document():
+    """Endpoint to analyze and summarize the first document in the directory"""
+    try:
+        # Find available text files
+        text_files = [
+            f for f in os.listdir(EXTRACTED_TEXT_DIR) if f.endswith(".txt")
+        ]
+        if not text_files:
+            return {"error": "No text files found in the directory"}
+
+        # Use the first file found
+        first_filename = text_files[0]
+        text_path = os.path.join(EXTRACTED_TEXT_DIR, first_filename)
+
+        # Read the document
+        with open(text_path, "r", encoding="utf-8") as file:
+            full_text = file.read()
+
+        # Generate summary
+        summary = generate_summary(full_text)
+
+        # Get document statistics
+        word_count = len(full_text.split())
+        sentence_count = len([s for s in full_text.split('.') if s.strip()])
+
+        return {
+            "filename": first_filename,
+            "summary": summary,
+            "statistics": {
+                "word_count": word_count,
+                "sentence_count": sentence_count,
+                "compression_ratio": (
+                    len(summary.split()) / word_count if word_count > 0 else 0
+                )
+            }
+        }
+    except Exception as e:
+        return {"error": f"Error during analysis: {str(e)}"}
+
+@app.post("/upload_pdf")
 async def upload_pdf(file: UploadFile = File(...)):
-    # Save the uploaded PDF
-    pdf_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(pdf_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    # Extract text using PyMuPDF (fitz)
-    extracted_text = []
-    pdf_document = fitz.open(pdf_path)
-    
-    for page_num in range(len(pdf_document)):
-        page = pdf_document.load_page(page_num)
-        text = page.get_text()
-        extracted_text.extend(text.splitlines())
-    
-    pdf_document.close()
+    """Endpoint to upload a PDF file and extract its text"""
+    try:
+        # Save uploaded file
+        file_location = os.path.join(UPLOAD_DIR, file.filename)
+        with open(file_location, "wb+") as file_object:
+            shutil.copyfileobj(file.file, file_object)
 
-    # Save the extracted text to a .txt file
-    text_filename = f"{os.path.splitext(file.filename)[0]}.txt"
-    text_path = os.path.join(EXTRACTED_TEXT_DIR, text_filename)
-    with open(text_path, "w", encoding="utf-8") as text_file:
-        text_file.write("\n".join(extracted_text))
+        # Extract text from PDF
+        doc = fitz.open(file_location)
+        text = ""
+        for page in doc:
+            text += page.get_text()
 
-    # Generate and upsert embeddings for each line of extracted text
-    for i, line in enumerate(extracted_text):
-        if line.strip():  # Ensure non-empty lines are processed
-            embedding = get_embedding(line)
-            index.upsert(
-                vectors=[
-                    {
-                        "id": f"{file.filename}_line_{i}",
-                        "values": embedding,
-                        "metadata": {"text": line}
-                    }
-                ],
-                namespace="real"
-            )
+        # Save extracted text to a file
+        text_filename = os.path.splitext(file.filename)[0] + ".txt"
+        text_path = os.path.join(EXTRACTED_TEXT_DIR, text_filename)
+        with open(text_path, "w", encoding="utf-8") as text_file:
+            text_file.write(text)
 
-    return {
-        "message": "PDF processed, text file saved, and embeddings generated and upserted to Pinecone",
-        "text_file": text_path
-    }
+        return {"filename": text_filename, "status": "Text extracted successfully"}
+    except Exception as e:
+        return {"error": f"Error during PDF upload or text extraction: {str(e)}"}
