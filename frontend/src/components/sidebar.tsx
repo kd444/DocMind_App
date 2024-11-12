@@ -2,17 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, MessageSquare, Upload } from "lucide-react";
+import { Home, MessageSquare, Upload, BarChart } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const links = [
+    { href: "/", label: "Home", icon: Home },
+    { href: "/chat", label: "Chat", icon: MessageSquare },
+    { href: "/upload", label: "Upload", icon: Upload },
+    { href: "/analysis", label: "Analysis", icon: BarChart },
+];
 
 export function Sidebar() {
     const pathname = usePathname();
-
-    const links = [
-        { href: "/", label: "Home", icon: Home },
-        { href: "/chat", label: "Chat", icon: MessageSquare },
-        { href: "/upload", label: "Upload", icon: Upload },
-    ];
 
     return (
         <div className="w-64 bg-secondary text-secondary-foreground p-4">

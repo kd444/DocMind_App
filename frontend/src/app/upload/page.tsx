@@ -1,3 +1,5 @@
+// app/upload/page.tsx
+
 "use client";
 
 import { useState, useRef } from "react";
@@ -5,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Upload, FileText } from "lucide-react";
+import { uploadFile } from "@/lib/api";
 
 export default function UploadPage() {
     const [file, setFile] = useState<File | null>(null);
@@ -20,15 +23,9 @@ export default function UploadPage() {
     const handleUpload = async () => {
         if (file) {
             setIsUploading(true);
-            const formData = new FormData();
-            formData.append("file", file);
 
             try {
-                const response = await fetch("http://localhost:8000/upload", {
-                    method: "POST",
-                    body: formData,
-                });
-                const data = await response.json();
+                const data = await uploadFile(file);
                 console.log("Upload successful:", data);
                 // Reset file input
                 if (fileInputRef.current) {
@@ -54,7 +51,7 @@ export default function UploadPage() {
                         type="file"
                         onChange={handleFileChange}
                         ref={fileInputRef}
-                        className="flex-grow"
+                        className="-grow"
                     />
                     <Button
                         onClick={handleUpload}
