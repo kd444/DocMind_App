@@ -9,22 +9,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from transformers import pipeline
 from pinecone import Pinecone, ServerlessSpec
 import numpy as np
+from pydantic import BaseModel
 
-# Import necessary modules from LangChain and Pydantic
+# Import necessary modules from LangChain
 from langchain.vectorstores import Pinecone as PineconeVectorStore
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.chains import RetrievalQA
 from langchain.llms import OpenAI
-from pydantic import BaseModel
 
 # Load environment variables and setup directories
 load_dotenv()
 UPLOAD_DIR = "uploaded_files"
 EXTRACTED_TEXT_DIR = "extracted_texts"
-EMBEDDINGS_DIR = "embeddings"
+ANALYSIS_DIR = "analysis"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(EXTRACTED_TEXT_DIR, exist_ok=True)
-os.makedirs(EMBEDDINGS_DIR, exist_ok=True)
+os.makedirs(ANALYSIS_DIR, exist_ok=True)
 
 # Set OpenAI API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -45,12 +45,9 @@ app.add_middleware(
 MODEL_NAME = "facebook/bart-large-cnn"
 summarizer = pipeline("summarization", model=MODEL_NAME)
 
-# Global variable to store the latest analysis
-latest_analysis = {}
-
 # Initialize Pinecone
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
-environment = "us-east-1"  # Replace with your specific environment if different
+environment = "us-east-1"
 pc = Pinecone(api_key=pinecone_api_key)
 index_name = "docmindapp"
 if index_name not in pc.list_indexes().names():
@@ -65,66 +62,49 @@ if index_name not in pc.list_indexes().names():
     )
 index = pc.Index(index_name)
 
-# Function to generate embeddings using OpenAI's updated Embedding API
-def get_embedding(text, model="text-embedding-ada-002"):
-    response = openai.Embedding.create(input=[text], model=model)
-    return response['data'][0]['embedding']
-
 def chunk_text(text, max_chunk_size=1024):
-    """Split text into smaller chunks for processing"""
     words = text.split()
-    chunks = []
-    current_chunk = []
+    chunks, current_chunk = [], []
     current_size = 0
-
     for word in words:
         if current_size + len(word) + 1 > max_chunk_size:
             chunks.append(' '.join(current_chunk))
-            current_chunk = [word]
-            current_size = len(word)
+            current_chunk, current_size = [word], len(word)
         else:
             current_chunk.append(word)
             current_size += len(word) + 1
-
     if current_chunk:
         chunks.append(' '.join(current_chunk))
     return chunks
 
 def generate_summary(text):
-    """Generate summary using the summarization pipeline"""
-    # Split text into chunks if it's too long
     chunks = chunk_text(text)
     summaries = []
-
     for chunk in chunks:
-        # Skip empty or very short chunks
         if len(chunk.split()) < 10:
             continue
-
-        summary = summarizer(
-            chunk,
-            max_length=150,
-            min_length=30,
-            do_sample=False,
-            num_beams=4,
-            early_stopping=True
-        )
+        summary = summarizer(chunk, max_length=150, min_length=30, do_sample=False, num_beams=4)
         summaries.append(summary[0]['summary_text'])
+    return " ".join(summaries)
 
-    # Combine summaries if multiple chunks were processed
-    final_summary = " ".join(summaries)
-    return final_summary
+def get_embedding(text, model="text-embedding-ada-002"):
+    response = openai.Embedding.create(input=[text], model=model)
+    return response['data'][0]['embedding']
 
 @app.get("/analysis")
 def analyze_document():
     """Endpoint to return the latest analysis"""
     try:
-        if not latest_analysis:
+        analysis_file_path = os.path.join(ANALYSIS_DIR, "latest_analysis.txt")
+        if not os.path.exists(analysis_file_path):
             return {"error": "No analysis available. Please upload a document first."}
-
-        return latest_analysis
+        
+        with open(analysis_file_path, "r", encoding="utf-8") as file:
+            analysis = file.read()
+        
+        return {"analysis": analysis}
     except Exception as e:
-        return {"error": f"Error during analysis: {str(e)}"}
+        return {"error": f"Error during analysis retrieval: {str(e)}"}
 
 @app.post("/upload_pdf")
 async def upload_pdf(file: UploadFile = File(...)):
@@ -137,9 +117,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
         # Extract text from PDF
         doc = fitz.open(file_location)
-        text = ""
-        for page in doc:
-            text += page.get_text()
+        text = "".join([page.get_text() for page in doc])
 
         # Save extracted text to a file
         text_filename = os.path.splitext(file.filename)[0] + ".txt"
@@ -154,27 +132,27 @@ async def upload_pdf(file: UploadFile = File(...)):
         word_count = len(text.split())
         sentence_count = len([s for s in text.split('.') if s.strip()])
 
-        # Store the latest analysis in the global variable
-        global latest_analysis
-        latest_analysis = {
+        # Store the latest analysis in a file
+        analysis_data = {
             "filename": text_filename,
             "summary": summary,
             "statistics": {
                 "word_count": word_count,
                 "sentence_count": sentence_count,
-                "compression_ratio": (
-                    len(summary.split()) / word_count if word_count > 0 else 0
-                )
+                "compression_ratio": (len(summary.split()) / word_count if word_count > 0 else 0)
             }
         }
 
+        # Save analysis to a file
+        analysis_path = os.path.join(ANALYSIS_DIR, "latest_analysis.txt")
+        with open(analysis_path, "w", encoding="utf-8") as analysis_file:
+            json.dump(analysis_data, analysis_file, indent=4)
+
         # Generate and upsert embeddings for each line of extracted text
-        embeddings = []
         pinecone_success = True
         for i, line in enumerate(text.splitlines()):
-            if line.strip():  # Ensure non-empty lines are processed
+            if line.strip():
                 embedding = get_embedding(line)
-                embeddings.append({"text": line, "embedding": embedding})
                 try:
                     index.upsert(
                         vectors=[
@@ -190,22 +168,14 @@ async def upload_pdf(file: UploadFile = File(...)):
                     pinecone_success = False
                     print(f"Error upserting to Pinecone: {str(e)}")
 
-        # Save the embeddings to a JSON file
-        embeddings_filename = f"{os.path.splitext(file.filename)[0]}_embeddings.json"
-        embeddings_path = os.path.join(EMBEDDINGS_DIR, embeddings_filename)
-        with open(embeddings_path, "w", encoding="utf-8") as embeddings_file:
-            json.dump(embeddings, embeddings_file)
-
         return {
-            "message": "PDF processed, text file saved, and embeddings generated",
-            "text_file": text_path,
-            "embeddings_file": embeddings_path,
+            "message": "PDF processed, analysis saved, and embeddings generated",
+            "analysis_file": analysis_path,
             "pinecone_status": "Success" if pinecone_success else "Failed"
         }
     except Exception as e:
         return {"error": f"Error during PDF upload or text extraction: {str(e)}"}
 
-# Define a request model for the question
 class QuestionRequest(BaseModel):
     question: str
 
@@ -213,10 +183,7 @@ class QuestionRequest(BaseModel):
 async def ask_question(request: QuestionRequest):
     """Endpoint to answer questions based on the uploaded documents"""
     try:
-        # Initialize the OpenAI embeddings
         embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
-
-        # Initialize the Pinecone vector store
         docsearch = PineconeVectorStore.from_existing_index(
             index_name=index_name,
             embedding=embeddings,
@@ -224,16 +191,12 @@ async def ask_question(request: QuestionRequest):
             namespace="real"
         )
 
-        # Create a RetrievalQA chain
         qa = RetrievalQA.from_chain_type(
             llm=OpenAI(temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY")),
             chain_type="stuff",
-            retriever=docsearch.as_retriever(
-                search_kwargs={"k": 3}  # Retrieve top 3 most relevant documents
-            )
+            retriever=docsearch.as_retriever(search_kwargs={"k": 6})
         )
 
-        # Get the answer
         answer = qa.run(request.question)
 
         return {"answer": answer}
@@ -241,16 +204,14 @@ async def ask_question(request: QuestionRequest):
     except Exception as e:
         return {"error": f"Error during question answering: {str(e)}"}
 
-
 @app.get("/get_vectors")
 def get_vectors():
     try:
-        # Fetch vectors from Pinecone
         query_response = index.query(
-            top_k=100,  # Adjust as needed
+            top_k=100,
             include_values=True,
             include_metadata=True,
-            namespace="real"  # Use the same namespace as during upsert
+            namespace="real"
         )
         vectors = [
             {
