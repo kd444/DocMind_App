@@ -168,6 +168,10 @@ async def upload_pdf(file: UploadFile = File(...)):
                     pinecone_success = False
                     print(f"Error upserting to Pinecone: {str(e)}")
 
+        # Delete the uploaded file and extracted text file
+        os.remove(file_location)
+        os.remove(text_path)
+
         return {
             "message": "PDF processed, analysis saved, and embeddings generated",
             "analysis_file": analysis_path,
