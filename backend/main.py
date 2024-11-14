@@ -6,16 +6,13 @@ import openai
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from transformers import pipeline
-from pinecone import Pinecone, ServerlessSpec
-import numpy as np
+from transformers import pipeline, BartTokenizer, BartForConditionalGeneration
 from pydantic import BaseModel
-
-# Import necessary modules from LangChain
 from langchain.vectorstores import Pinecone as PineconeVectorStore
 from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.chains import RetrievalQA
 from langchain.llms import OpenAI
+from langchain.chains import RetrievalQA
+from pinecone import Pinecone, ServerlessSpec
 
 # Load environment variables and setup directories
 load_dotenv()
@@ -41,9 +38,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize summarizer pipeline
-MODEL_NAME = "facebook/bart-large-cnn"
-summarizer = pipeline("summarization", model=MODEL_NAME)
+# Load custom BART model and tokenizer
+MODEL_PATH = "./custom_bart_model_pretrained"
+bart_tokenizer = BartTokenizer.from_pretrained(MODEL_PATH)
+bart_model = BartForConditionalGeneration.from_pretrained(MODEL_PATH)
+summarizer = pipeline("summarization", model=bart_model, tokenizer=bart_tokenizer)
 
 # Initialize Pinecone
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
@@ -62,6 +61,7 @@ if index_name not in pc.list_indexes().names():
     )
 index = pc.Index(index_name)
 
+# Helper function to chunk text
 def chunk_text(text, max_chunk_size=1024):
     words = text.split()
     chunks, current_chunk = [], []
@@ -77,6 +77,7 @@ def chunk_text(text, max_chunk_size=1024):
         chunks.append(' '.join(current_chunk))
     return chunks
 
+# Function to generate summary using custom BART model
 def generate_summary(text):
     chunks = chunk_text(text)
     summaries = []
@@ -87,6 +88,7 @@ def generate_summary(text):
         summaries.append(summary[0]['summary_text'])
     return " ".join(summaries)
 
+# Function to get embeddings
 def get_embedding(text, model="text-embedding-ada-002"):
     response = openai.Embedding.create(input=[text], model=model)
     return response['data'][0]['embedding']
@@ -180,6 +182,7 @@ async def upload_pdf(file: UploadFile = File(...)):
     except Exception as e:
         return {"error": f"Error during PDF upload or text extraction: {str(e)}"}
 
+# Endpoint to answer questions based on document
 class QuestionRequest(BaseModel):
     question: str
 
