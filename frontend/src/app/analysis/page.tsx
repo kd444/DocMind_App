@@ -30,16 +30,29 @@ export default function AnalysisPage() {
 
     const renderAnalysis = (analysis: any) => {
         try {
-            const parsedAnalysis = JSON.parse(analysis.analysis);
+            const parsedAnalysis = analysis;
+
             return (
                 <div className="space-y-4">
                     <h3 className="text-lg font-semibold">Analysis Result:</h3>
                     <p>
                         <strong>Filename:</strong> {parsedAnalysis.filename}
                     </p>
-                    <p>
-                        <strong>Summary:</strong> {parsedAnalysis.summary}
-                    </p>
+                    <div>
+                        <h4 className="font-semibold">Summaries:</h4>
+                        <div className="mb-4">
+                            <p>
+                                <strong>Custom BART Summary:</strong>{" "}
+                                {parsedAnalysis.summary_bart}
+                            </p>
+                        </div>
+                        <div className="mb-4">
+                            <p>
+                                <strong>PEGASUS Summary:</strong>{" "}
+                                {parsedAnalysis.summary_pegasus}
+                            </p>
+                        </div>
+                    </div>
                     <div>
                         <h4 className="font-semibold">Statistics:</h4>
                         <p>
@@ -51,8 +64,16 @@ export default function AnalysisPage() {
                             {parsedAnalysis.statistics.sentence_count}
                         </p>
                         <p>
-                            <strong>Compression Ratio:</strong>{" "}
-                            {parsedAnalysis.statistics.compression_ratio}
+                            <strong>Compression Ratio (BART):</strong>{" "}
+                            {parsedAnalysis.statistics.compression_ratio_bart.toFixed(
+                                2
+                            )}
+                        </p>
+                        <p>
+                            <strong>Compression Ratio (PEGASUS):</strong>{" "}
+                            {parsedAnalysis.statistics.compression_ratio_pegasus.toFixed(
+                                2
+                            )}
                         </p>
                     </div>
                 </div>

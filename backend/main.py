@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from transformers import pipeline, BartTokenizer, BartForConditionalGeneration
+from transformers import PegasusTokenizer, PegasusForConditionalGeneration  # Added for PEGASUS
 from pydantic import BaseModel
 from langchain.vectorstores import Pinecone as PineconeVectorStore
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -44,6 +45,12 @@ bart_tokenizer = BartTokenizer.from_pretrained(MODEL_PATH)
 bart_model = BartForConditionalGeneration.from_pretrained(MODEL_PATH)
 summarizer = pipeline("summarization", model=bart_model, tokenizer=bart_tokenizer)
 
+# Load PEGASUS model and tokenizer
+pegasus_model_name = "google/pegasus-xsum"  # You can use "google/pegasus-cnn_dailymail" if preferred
+pegasus_tokenizer = PegasusTokenizer.from_pretrained(pegasus_model_name)
+pegasus_model = PegasusForConditionalGeneration.from_pretrained(pegasus_model_name)
+pegasus_summarizer = pipeline("summarization", model=pegasus_model, tokenizer=pegasus_tokenizer)
+
 # Initialize Pinecone
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
 environment = "us-east-1"
@@ -78,13 +85,24 @@ def chunk_text(text, max_chunk_size=1024):
     return chunks
 
 # Function to generate summary using custom BART model
-def generate_summary(text):
+def generate_summary_bart(text):
     chunks = chunk_text(text)
     summaries = []
     for chunk in chunks:
         if len(chunk.split()) < 10:
             continue
         summary = summarizer(chunk, max_length=150, min_length=30, do_sample=False, num_beams=4)
+        summaries.append(summary[0]['summary_text'])
+    return " ".join(summaries)
+
+# Function to generate summary using PEGASUS model
+def generate_summary_pegasus(text):
+    chunks = chunk_text(text)
+    summaries = []
+    for chunk in chunks:
+        if len(chunk.strip()) == 0:
+            continue
+        summary = pegasus_summarizer(chunk, max_length=150, min_length=30, do_sample=False)
         summaries.append(summary[0]['summary_text'])
     return " ".join(summaries)
 
@@ -102,9 +120,9 @@ def analyze_document():
             return {"error": "No analysis available. Please upload a document first."}
         
         with open(analysis_file_path, "r", encoding="utf-8") as file:
-            analysis = file.read()
+            analysis_data = json.load(file)
         
-        return {"analysis": analysis}
+        return analysis_data
     except Exception as e:
         return {"error": f"Error during analysis retrieval: {str(e)}"}
 
@@ -127,8 +145,11 @@ async def upload_pdf(file: UploadFile = File(...)):
         with open(text_path, "w", encoding="utf-8") as text_file:
             text_file.write(text)
 
-        # Generate summary
-        summary = generate_summary(text)
+        # Generate summary using custom BART model
+        summary_bart = generate_summary_bart(text)
+
+        # Generate summary using PEGASUS model
+        summary_pegasus = generate_summary_pegasus(text)
 
         # Get document statistics
         word_count = len(text.split())
@@ -137,11 +158,13 @@ async def upload_pdf(file: UploadFile = File(...)):
         # Store the latest analysis in a file
         analysis_data = {
             "filename": text_filename,
-            "summary": summary,
+            "summary_bart": summary_bart,
+            "summary_pegasus": summary_pegasus,
             "statistics": {
                 "word_count": word_count,
                 "sentence_count": sentence_count,
-                "compression_ratio": (len(summary.split()) / word_count if word_count > 0 else 0)
+                "compression_ratio_bart": (len(summary_bart.split()) / word_count if word_count > 0 else 0),
+                "compression_ratio_pegasus": (len(summary_pegasus.split()) / word_count if word_count > 0 else 0)
             }
         }
 
