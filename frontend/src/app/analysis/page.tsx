@@ -33,28 +33,58 @@ export default function AnalysisPage() {
             const parsedAnalysis = analysis;
 
             return (
-                <div className="space-y-4">
-                    <h3 className="text-lg font-semibold">Analysis Result:</h3>
+                <div className="space-y-6">
+                    <h3 className="text-2xl font-semibold">Analysis Result</h3>
                     <p>
                         <strong>Filename:</strong> {parsedAnalysis.filename}
                     </p>
+
+                    {/* Summaries Section */}
                     <div>
-                        <h4 className="font-semibold">Summaries:</h4>
-                        <div className="mb-4">
-                            <p>
-                                <strong>Custom BART Summary:</strong>{" "}
+                        <h4 className="text-xl font-semibold mb-2">
+                            Summaries
+                        </h4>
+
+                        {/* Custom BART Summary */}
+                        <div className="mb-6">
+                            <p className="font-semibold">
+                                Custom BART Summary:
+                            </p>
+                            <div className="max-h-60 overflow-y-auto border p-4 rounded">
                                 {parsedAnalysis.summary_bart}
+                            </div>
+                            <p className="mt-2">
+                                <strong>Cosine Similarity (BART):</strong>{" "}
+                                {parsedAnalysis.cosine_similarity_bart
+                                    ? parsedAnalysis.cosine_similarity_bart.toFixed(
+                                          4
+                                      )
+                                    : "Not Available"}
                             </p>
                         </div>
-                        <div className="mb-4">
-                            <p>
-                                <strong>PEGASUS Summary:</strong>{" "}
-                                {parsedAnalysis.summary_pegasus}
+
+                        {/* T5 Summary */}
+                        <div className="mb-6">
+                            <p className="font-semibold">T5 Summary:</p>
+                            <div className="max-h-60 overflow-y-auto border p-4 rounded">
+                                {parsedAnalysis.summary_t5}
+                            </div>
+                            <p className="mt-2">
+                                <strong>Cosine Similarity (T5):</strong>{" "}
+                                {parsedAnalysis.cosine_similarity_t5
+                                    ? parsedAnalysis.cosine_similarity_t5.toFixed(
+                                          4
+                                      )
+                                    : "Not Available"}
                             </p>
                         </div>
                     </div>
+
+                    {/* Statistics Section */}
                     <div>
-                        <h4 className="font-semibold">Statistics:</h4>
+                        <h4 className="text-xl font-semibold mb-2">
+                            Statistics
+                        </h4>
                         <p>
                             <strong>Word Count:</strong>{" "}
                             {parsedAnalysis.statistics.word_count}
@@ -65,15 +95,19 @@ export default function AnalysisPage() {
                         </p>
                         <p>
                             <strong>Compression Ratio (BART):</strong>{" "}
-                            {parsedAnalysis.statistics.compression_ratio_bart.toFixed(
-                                2
-                            )}
+                            {parsedAnalysis.statistics.compression_ratio_bart
+                                ? parsedAnalysis.statistics.compression_ratio_bart
+                                      .toFixed(2)
+                                      .replace(/^0\./, ".")
+                                : "N/A"}
                         </p>
                         <p>
-                            <strong>Compression Ratio (PEGASUS):</strong>{" "}
-                            {parsedAnalysis.statistics.compression_ratio_pegasus.toFixed(
-                                2
-                            )}
+                            <strong>Compression Ratio (T5):</strong>{" "}
+                            {parsedAnalysis.statistics.compression_ratio_t5
+                                ? parsedAnalysis.statistics.compression_ratio_t5
+                                      .toFixed(2)
+                                      .replace(/^0\./, ".")
+                                : "N/A"}
                         </p>
                     </div>
                 </div>
